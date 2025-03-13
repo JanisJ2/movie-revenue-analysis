@@ -1,0 +1,208 @@
+---
+title: "main"
+output: html_document
+---
+
+Plan:
+- Predict released movie revenue
+- Predictors:
+  - adult
+  - popularity
+  - budget
+  - release date -> season
+  - runtime
+  - genres
+  - casts (and their popularity?)
+  - non-casts (and their popularity?)
+  
+```{r setup, eval = FALSE}
+!install.packages(c("httr", "dplyr", "jsonlite", "progress", "dplyr"))
+```
+
+```{r library}
+library(httr)
+library(dplyr)
+library(jsonlite)
+library(progress)
+library(dplyr)
+```
+
+```{r constants}
+API_KEY <- "e6d34aa453d1a71af2b6e77848923e57"
+BASE_URL <- "https://api.themoviedb.org/3/"
+DISCOVER_MOVIE_PATH <- "discover/movie"
+MOVIE_PATH <- "movie/"
+
+MOVIES_COUNT <- 100
+MOVIES_PER_PAGE <- 20
+```
+
+# Fetching Data
+```{r}
+response <- GET(
+  url = paste0(BASE_URL, DISCOVER_MOVIE_PATH),
+  query = list(
+    sort_by = "revenue.desc",
+    api_key = API_KEY
+  )
+)
+
+movie_total_results <- content(response)$total_results
+movie_total_pages <- content(response)$total_pages
+
+cat("There are", movie_total_results, "movies in total provided by the API.\n")
+cat("These movies are paginated into", movie_total_pages, "pages", "with", MOVIES_PER_PAGE, "movies per page.\n")
+```
+## Fetch movie ids and titles
+```{r}
+movies <- data.frame()
+n_pages <- ceiling(MOVIES_COUNT / MOVIES_PER_PAGE)
+pb <- txtProgressBar(min = 0, max = n_pages, style = 3)
+
+for (page in 1:n_pages) {
+  response <- GET(
+    url = paste0(BASE_URL, DISCOVER_MOVIE_PATH),
+    query = list(
+      sort_by = "revenue.desc",
+      page = page,
+      api_key = API_KEY
+    )
+  )
+  
+  # Check if API request was successful
+  if (status_code(response) != 200) {
+    print(paste("Skipping page", page, "- API error:", status_code(response)))
+    next
+  }
+  
+  data <- fromJSON(content(response, as = "text"))$results
+  page_movies <- data.frame(
+    movie_id = data$id,
+    title = data$title
+  )
+  movies <- rbind(movies, page_movies)
+  setTxtProgressBar(pb, page)
+}
+
+close(pb)
+cat("Successfully fetch all movie ids and titles!")
+```
+
+## Fetch movie details (revenue, adult, popularity, budget, release date, runtime, genres)
+```{r}
+pb <- txtProgressBar(min = 0, max = nrow(movies), style = 3)
+all_genres <- c()
+
+for (i in 1:nrow(movies)) {
+  movie_id <- movies$movie_id[i]
+  
+  response <- GET(
+    url = paste0(BASE_URL, MOVIE_PATH, movie_id),
+    query = list(
+      api_key = API_KEY
+    )
+  )
+  
+  # Check if API request was successful
+  if (status_code(response) != 200) {
+    print(paste("Skipping movie", movie_id, "- API error:", status_code(response)))
+    next
+  }
+  
+  data <- fromJSON(content(response, as = "text"))
+
+  movies$revenue[i] <- data$revenue
+  movies$adult[i] <- as.logical(data$adult)
+  movies$popularity[i] <- data$popularity
+  movies$budget[i] <- data$budget
+  movies$release_date[i] <- data$release_date
+  movies$runtime[i] <- data$runtime
+
+  genres <- data$genres
+  movies$genres[i] <- paste(genres$name, collapse = ",")
+  for (genre in genres$name) {
+    all_genres <- unique(c(all_genres, genre))
+  }
+  setTxtProgressBar(pb, i)
+}
+
+close(pb)
+cat("Successfully fetch movie details!")
+```
+
+```{r}
+all_genres
+```
+
+## Fetch movie credits (casts and non-casts)
+```{r}
+cat(paste0(BASE_URL, MOVIE_PATH, 1231, "credits"))
+pb <- txtProgressBar(min = 0, max = nrow(movies), style = 3)
+
+movies$cast <- NA       # Stores top 5 actors
+movies$non_cast <- NA   # Stores top 5 crew members (excluding actors)
+
+for (i in 1:nrow(movies)) {
+  movie_id <- movies$movie_id[i]
+  
+  response <- GET(
+    url = paste0(BASE_URL, MOVIE_PATH, movie_id, "/credits"),
+    query = list(
+      api_key = API_KEY 
+    )
+  )
+  
+  # Check if API request was successful
+  if (status_code(response) != 200) {
+    print(paste("Skipping movie", movie_id, "- API error:", status_code(response)))
+    next
+  }
+
+  credits <- fromJSON(content(response, as = "text"))
+
+  ## Extract CAST (Actors)
+  if (!is.null(credits$cast) && length(credits$cast) > 0) {
+    # Filter only actors (those with a "character" field)
+    cast_members <- credits$cast[!is.null(credits$cast$character), ]
+    
+    top_cast <- head(cast_members, 5)
+    
+    # Format: "Actor1 (popularity), Actor2 (popularity)"
+    movies$cast[i] <- paste(top_cast$name, "(", round(top_cast$popularity, 1), ")", collapse = ", ")
+  } else {
+    movies$cast[i] <- NA  # Handle missing cast
+  }
+  
+  ## Extract NON-CAST (Directors, Producers, etc.)
+  if (!is.null(credits$crew) && length(credits$crew) > 0) {
+    # Exclude actors (crew members without "character" role)
+    non_cast_members <- credits$crew[is.null(credits$crew$character), ]
+    
+    top_non_cast <- head(non_cast_members, 5)
+    
+    # Format: "Crew1 (popularity), Crew2 (popularity)"
+    movies$non_cast[i] <- paste(top_non_cast$name, "(", round(top_non_cast$popularity, 1), ")", collapse = ", ")
+  } else {
+    movies$non_cast[i] <- NA  # Handle missing non-cast members
+  }
+
+  setTxtProgressBar(pb, i)
+}
+close(pb)
+```
+
+```{r}
+colSums(is.na(movies))
+```
+fetching data completed
+
+
+
+
+
+
+
+
+
+
+

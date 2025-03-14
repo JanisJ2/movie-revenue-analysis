@@ -16,7 +16,7 @@ Plan:
   - non-casts (and their popularity?)
   
 ```{r setup, eval = FALSE}
-!install.packages(c("httr", "dplyr", "jsonlite", "progress", "dplyr"))
+!install.packages(c("httr", "dplyr", "jsonlite", "progress", "dplyr", "tidyr", "ggplot2", "knitr", "ggcorplot"))
 ```
 
 ```{r library}
@@ -25,6 +25,10 @@ library(dplyr)
 library(jsonlite)
 library(progress)
 library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(knitr)
+library(ggcorplot)
 ```
 
 ```{r constants}
@@ -33,7 +37,7 @@ BASE_URL <- "https://api.themoviedb.org/3/"
 DISCOVER_MOVIE_PATH <- "discover/movie"
 MOVIE_PATH <- "movie/"
 
-MOVIES_COUNT <- 100
+MOVIES_COUNT <- 1000
 MOVIES_PER_PAGE <- 20
 ```
 
@@ -160,7 +164,7 @@ for (i in 1:nrow(movies)) {
 
   credits <- fromJSON(content(response, as = "text"))
 
-  ## Extract CAST (Actors)
+  # Extract CAST (Actors)
   if (!is.null(credits$cast) && length(credits$cast) > 0) {
     # Filter only actors (those with a "character" field)
     cast_members <- credits$cast[!is.null(credits$cast$character), ]
@@ -168,12 +172,14 @@ for (i in 1:nrow(movies)) {
     top_cast <- head(cast_members, 5)
     
     # Format: "Actor1 (popularity), Actor2 (popularity)"
-    movies$cast[i] <- paste(top_cast$name, "(", round(top_cast$popularity, 1), ")", collapse = ", ")
+    movies$cast[i] <- paste0(top_cast$name, "(", round(top_cast$popularity, 1), ")", collapse = ", ")
+    movies$actor_avg_pop[i] <- mean(top_cast$popularity)
   } else {
-    movies$cast[i] <- NA  # Handle missing cast
+    movies$cast[i] <- NA  # Handle missing actor
+    movies$actor_avg_pop[i] <- NA
   }
   
-  ## Extract NON-CAST (Directors, Producers, etc.)
+  # Extract NON-CAST (Directors, Producers, etc.)
   if (!is.null(credits$crew) && length(credits$crew) > 0) {
     # Exclude actors (crew members without "character" role)
     non_cast_members <- credits$crew[is.null(credits$crew$character), ]
@@ -181,28 +187,347 @@ for (i in 1:nrow(movies)) {
     top_non_cast <- head(non_cast_members, 5)
     
     # Format: "Crew1 (popularity), Crew2 (popularity)"
-    movies$non_cast[i] <- paste(top_non_cast$name, "(", round(top_non_cast$popularity, 1), ")", collapse = ", ")
+    movies$non_cast[i] <- paste0(top_non_cast$name, "(", round(top_non_cast$popularity, 1), ")", collapse = ", ")
+    movies$crew_avg_pop[i] <- mean(top_non_cast$popularity)
   } else {
-    movies$non_cast[i] <- NA  # Handle missing non-cast members
+    movies$non_cast[i] <- NA  # Handle missing crew
+    movies$crew_avg_pop[i] <- NA
   }
 
   setTxtProgressBar(pb, i)
 }
 close(pb)
 ```
+## Change column names
+```{r}
+colnames(movies) <- c(
+  "movie_id",      # Unique movie ID
+  "title",         # Movie title
+  "revenue",       # Box office revenue
+  "adult",         # Whether the movie is rated adult (TRUE/FALSE)
+  "popularity",    # Popularity score from TMDB
+  "budget",        # Production budget
+  "release_date",  # Release date
+  "runtime",       # Duration in minutes
+  "genres",        # Movie genres
+  "actors",        # Top 5 actors
+  "crews",         # Top 5 crew members
+  "actor_avg_pop", # Average popularity of the top 5 actors
+  "crew_avg_pop"  # Average popularity of the top 5 crew members
+)
+colnames(movies)
+```
 
+# Cleaning the data
+
+## Store a copy of the original data
+```{r}
+movies_original <- movies
+```
+
+## Convert `release_date` to date
+```{r}
+movies$release_date <- as.Date(movies$release_date)
+```
+
+## Check for missing values
 ```{r}
 colSums(is.na(movies))
 ```
-fetching data completed
 
+```{r}
+cat("Summary for movie_id:\n")
+summary(movies$movie_id)
+cat("Number of empty title: ", sum(movies$title == ""), "\n")
+cat("Summary for revenue:\n")
+summary(movies$revenue)
+cat("Unique values of adult:\n")
+unique(movies$adult)
+cat("Summary for popularity:\n")
+summary(movies$popularity)
+cat("Summary for budget:\n")
+summary(movies$budget)
+cat("Summary for release_date:\n")
+summary(movies$release_date)
+cat("Summary for runtime:\n")
+summary(movies$runtime)
+cat("Unique values of genres:\n")
+unique(unique(unlist(strsplit(movies$genres, ","))))
+```
 
+We observe that all values are normal, except that adult is always false, some movies have 0 budget, some movies have 0 runtime, some movies don't have any actor or crew, and there are no release date for 4 movies.
 
+## Adult is always false
+Since adult is always false, we're not going to include it into our analysis since it doesn't provide any insight.
+```{r}
+movies <- select(movies, -adult)
+```
 
+## 0 budget movies
+```{r}
+zero_budget <- movies$budget == 0
+movies[zero_budget,]
+```
 
+## 0 runtime movies
+```{r}
+zero_runtime <- movies$runtime == 0
+movies[zero_runtime,]
+```
 
+## Remove zero values
+```{r}
+movies <- filter(movies, budget > 0 & runtime > 0)
+```
 
+## Movies without actor
+```{r}
+actors_na <- is.na(movies$actors)
+movies[actors_na,]
+```
 
+## Movies without crew
+```{r}
+crews_na <- is.na(movies$crews)
+movies[crews_na,]
+```
 
+## Movies without release date
+```{r}
+release_date_na <- is.na(movies$release_date)
+movies[release_date_na,]
+```
 
+## Remove NA values
+```{r}
+movies <- filter(movies, !is.na(release_date) & !is.na(actors) & !is.na(crews))
+colSums(is.na(movies))
+```
+
+##  Recheck the values
+```{r}
+cat("Summary for budget:\n")
+summary(movies$budget)
+cat("Summary for runtime:\n")
+summary(movies$runtime)
+```
+
+## Remove movies with an out-of-place runtime
+```{r}
+movies <- filter(movies, runtime != 4)
+summary(movies$runtime)
+```
+
+## Check the dimension, header, and footer of our cleaned dataset
+```{r}
+cat("Shape of movies: ", dim(movies), "\n")
+head(movies)
+tail(movies)
+```
+
+# Pre-processing data
+
+## Convert `release_date` to `season`
+```{r}
+movies$season <- case_when(
+  format(movies$release_date, "%m") %in% c("12", "01", "02") ~ "Winter",
+  format(movies$release_date, "%m") %in% c("03", "04", "05") ~ "Spring",
+  format(movies$release_date, "%m") %in% c("06", "07", "08") ~ "Summer",
+  format(movies$release_date, "%m") %in% c("09", "10", "11") ~ "Fall",
+  TRUE ~ "Unknown"
+)
+unique(movies$season)
+```
+
+## Convert `genres` into one-hot encoding
+```{r}
+movies <- movies %>%
+  separate_rows(genres, sep = ",") %>%
+  mutate(value = 1) %>%
+  pivot_wider(names_from = genres, values_from = value, values_fill = list(value = 0))
+```
+
+## Check the dimension, NA values, header, and footer of our cleaned dataset
+```{r}
+cat("Shape of movies: ", dim(movies), "\n")
+cat("Total number of missing values across all columns =", sum(colSums(is.na(movies))), "\n")
+head(movies)
+tail(movies)
+```
+
+# Exploratory data analysis (EDA)
+
+## Numerical summaries
+```{r}
+cat("Summary statistics for key numeric or date variables:\n")
+summary(select(movies, revenue, popularity, budget, release_date, runtime, actor_avg_pop, crew_avg_pop))
+
+cat("\nCount of movies for each season:")
+table(movies$season)
+```
+
+## Response variable (revenue)
+```{r}
+# Original scale
+ggplot(movies, aes(x = revenue)) +
+  geom_histogram(bins = 30, fill = "#3498db", color = "white", alpha = 0.8) +
+  theme_minimal() +
+  labs(title = "Distribution of Movie Revenue", 
+       x = "Revenue", 
+       y = "Frequency") +
+  theme(plot.title = element_text(hjust = 0.5, size = 14, face = "bold"))
+
+# Log scale
+ggplot(movies, aes(x = log10(revenue))) +
+  geom_histogram(bins = 30, fill = "#3498db", color = "white", alpha = 0.8) +
+  theme_minimal() +
+  labs(title = "Distribution of Movie Revenue (Log Scale)", 
+       x = "Log10(Revenue)", 
+       y = "Frequency") +
+  theme(plot.title = element_text(hjust = 0.5, size = 14, face = "bold"))
+```
+
+## Revenue vs. Budget
+```{r}
+ggplot(movies, aes(x = budget, y = revenue)) +
+  geom_point(alpha = 0.4, color = "#e74c3c") +
+  geom_smooth(method = "lm", color = "#2c3e50", se = FALSE, linetype = "dashed") +
+  theme_minimal() +
+  labs(title = "Budget vs. Revenue", 
+       x = "Budget", 
+       y = "Revenue") +
+  theme(plot.title = element_text(hjust = 0.5, size = 14, face = "bold"))
+
+ggplot(movies, aes(x = log10(budget), y = log10(revenue))) +
+  geom_point(alpha = 0.4, color = "#e74c3c") +
+  geom_smooth(method = "lm", color = "#2c3e50", se = FALSE, linetype = "dashed") +
+  theme_minimal() +
+  labs(title = "Budget vs. Revenue", 
+       x = "Log10(Budget)", 
+       y = "Log10(Revenue)") +
+  theme(plot.title = element_text(hjust = 0.5, size = 14, face = "bold"))
+```
+
+## Revenue vs. Release Season
+```{r}
+ggplot(movies, aes(x = season, y = revenue, fill = season)) +
+  geom_boxplot(alpha = 0.85, outlier.shape = 21, outlier.fill = "white", outlier.color = "black") +
+  scale_fill_manual(values = c("Winter" = "#74b9ff",
+                               "Spring" = "#00b894",
+                               "Summer" = "#f9ca24",
+                               "Fall" = "#d35400")) +
+  theme_minimal() +
+  labs(title = "Movie Revenue by Release Season", 
+       x = "Season", 
+       y = "Revenue") +
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 14, face = "bold"),
+    legend.position = "none",
+    axis.text.x = element_text(face = "bold", size = 12)
+  )
+
+ggplot(movies, aes(x = season, y = log10(revenue), fill = season)) +
+  geom_boxplot(alpha = 0.85, outlier.shape = 21, outlier.fill = "white", outlier.color = "black") +
+  scale_fill_manual(values = c("Winter" = "#74b9ff",
+                               "Spring" = "#00b894",
+                               "Summer" = "#f9ca24",
+                               "Fall" = "#d35400")) +
+  theme_minimal() +
+  labs(title = "Movie Revenue by Release Season", 
+       x = "Season", 
+       y = "Log10(Revenue)") +
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 14, face = "bold"),
+    legend.position = "none",
+    axis.text.x = element_text(face = "bold", size = 12)
+  )
+```
+
+## Revenue vs. Genres
+```{r}
+# Define colors based on genre themes
+genre_colors <- c(
+  "Action" = "#e74c3c",      
+  "Adventure" = "#f39c12",   
+  "Animation" = "#f1c40f",      
+  "Comedy" = "#2ecc71",       
+  "Crime" = "#34495e",        
+  "Documentary" = "#95a5a6",    
+  "Drama" = "#9b59b6",     
+  "Family" = "#e67e22",    
+  "Fantasy" = "#8e44ad",       
+  "History" = "#d35400",       
+  "Horror" = "#c0392b",     
+  "Music" = "#1abc9c",     
+  "Mystery" = "#16a085",       
+  "Romance" = "#e84393",      
+  "Science Fiction" = "#27ae60",
+  "TV Movie" = "#7f8c8d",      
+  "Thriller" = "#2c3e50",     
+  "War" = "#bdc3c7",            
+  "Western" = "#8d6e63"
+)
+
+# Prepare genre-specific revenue data
+genre_revenue <- movies %>%
+  select(starts_with("Action"):starts_with("War"), revenue) %>%
+  pivot_longer(cols = starts_with("Action"):starts_with("War"), names_to = "Genre", values_to = "Presence") %>%
+  filter(Presence == 1)
+
+# Boxplot of revenue by genre
+ggplot(genre_revenue, aes(x = reorder(Genre, log10(revenue), FUN = median), y = log10(revenue), fill = Genre)) +
+  geom_boxplot(alpha = 0.85, outlier.shape = 21, outlier.fill = "white", outlier.color = "black") +
+  scale_fill_manual(values = genre_colors) +
+  coord_flip() +  # Horizontal layout for readability
+  theme_minimal() +
+  labs(title = "Revenue Distribution by Genre",
+       x = "Genre",
+       y = "Log10(Revenue)") +
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 14, face = "bold"),
+    legend.position = "none",
+    axis.text.x = element_text(face = "bold", size = 12),
+    axis.text.y = element_text(face = "bold", size = 10)
+  )
+
+```
+
+## Revenue vs. Actor's popularity
+```{r}
+ggplot(movies, aes(x = actor_avg_pop, y = log10(revenue))) +
+  geom_point(alpha = 0.5, color = "#9b59b6") +
+  geom_smooth(method = "lm", col = "#2c3e50", se = FALSE, linetype = "dashed") +
+  theme_minimal() +
+  labs(title = "Actor Popularity vs. Revenue", 
+       x = "Average Actor Popularity", 
+       y = "Log10(Revenue)") +
+  theme(plot.title = element_text(hjust = 0.5, size = 14, face = "bold"))
+```
+
+## Correlation heatmap of key numeric variables
+```{r}
+# Select only numerical columns
+numeric_vars <- select(movies, revenue, popularity, budget, runtime, actor_avg_pop, crew_avg_pop)
+
+# Compute correlation matrix
+corr_matrix <- cor(numeric_vars, use = "complete.obs")
+
+# Define a custom theme for better aesthetics
+ggcorrplot(corr_matrix, method = "square",
+           colors = c("#1f77b4", "white", "#d62728"),  # Blue (negative) → White (neutral) → Red (positive)
+           lab = TRUE,  # Show correlation values
+           lab_size = 5,  # Larger labels
+           outline.color = "black",  # Borders for better contrast
+           ggtheme = theme_minimal()) +  # Minimalist theme
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 16, face = "bold", color = "#2c3e50"),  # Elegant title
+    panel.grid.major = element_blank(),  # Remove grid lines for a clean look
+    panel.border = element_blank(),  # No outer border
+    axis.text.x = element_text(size = 12, angle = 45, hjust = 1, color = "#2c3e50", face = "bold"),  # Rotated x-labels
+    axis.text.y = element_text(size = 12, color = "#2c3e50", face = "bold")  # Bold y-labels
+  ) +
+  labs(title = "Correlation Heatmap: Movie Revenue vs Predictors")
+```
+
+## continue visualizing the rest predictors and additional?
 

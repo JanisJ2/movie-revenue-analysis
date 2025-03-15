@@ -16,7 +16,7 @@ Plan:
   - non-casts (and their popularity?)
   
 ```{r setup, eval = FALSE}
-!install.packages(c("httr", "dplyr", "jsonlite", "progress", "dplyr", "tidyr", "ggplot2", "knitr", "ggcorplot"))
+!install.packages(c("httr", "dplyr", "jsonlite", "progress", "dplyr", "tidyr", "ggplot2", "knitr", "ggcorrplot", "stringr", "xgboost"))
 ```
 
 ```{r library}
@@ -28,7 +28,9 @@ library(dplyr)
 library(tidyr)
 library(ggplot2)
 library(knitr)
-library(ggcorplot)
+library(ggcorrplot)
+library(stringr)
+library(xgboost)
 ```
 
 ```{r constants}
@@ -213,7 +215,7 @@ colnames(movies) <- c(
   "actors",        # Top 5 actors
   "crews",         # Top 5 crew members
   "actor_avg_pop", # Average popularity of the top 5 actors
-  "crew_avg_pop"  # Average popularity of the top 5 crew members
+  "crew_avg_pop"   # Average popularity of the top 5 crew members
 )
 colnames(movies)
 ```
@@ -329,14 +331,14 @@ tail(movies)
 
 ## Convert `release_date` to `season`
 ```{r}
-movies$season <- case_when(
+movies$season <- as.factor(case_when(
   format(movies$release_date, "%m") %in% c("12", "01", "02") ~ "Winter",
   format(movies$release_date, "%m") %in% c("03", "04", "05") ~ "Spring",
   format(movies$release_date, "%m") %in% c("06", "07", "08") ~ "Summer",
   format(movies$release_date, "%m") %in% c("09", "10", "11") ~ "Fall",
   TRUE ~ "Unknown"
-)
-unique(movies$season)
+))
+levels(movies$season)
 ```
 
 ## Convert `genres` into one-hot encoding
@@ -408,24 +410,71 @@ ggplot(movies, aes(x = log10(budget), y = log10(revenue))) +
   theme(plot.title = element_text(hjust = 0.5, size = 14, face = "bold"))
 ```
 
-## Revenue vs. Release Season
+## Revenue vs. Popularity
 ```{r}
-ggplot(movies, aes(x = season, y = revenue, fill = season)) +
-  geom_boxplot(alpha = 0.85, outlier.shape = 21, outlier.fill = "white", outlier.color = "black") +
-  scale_fill_manual(values = c("Winter" = "#74b9ff",
-                               "Spring" = "#00b894",
-                               "Summer" = "#f9ca24",
-                               "Fall" = "#d35400")) +
+## Revenue vs. Popularity
+ggplot(movies, aes(x = popularity, y = revenue)) +
+  geom_point(alpha = 0.5, color = "#3498db") +
+  geom_smooth(method = "lm", color = "#2c3e50", se = FALSE, linetype = "dashed") +
   theme_minimal() +
-  labs(title = "Movie Revenue by Release Season", 
-       x = "Season", 
+  labs(
+    title = "Movie Popularity vs. Revenue",
+    x = "TMDb Popularity Score",
+    y = "Revenue"
+  ) +
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 14, face = "bold"),
+    axis.text = element_text(size = 12),
+    axis.title = element_text(size = 13, face = "bold")
+  )
+
+ggplot(movies, aes(x = popularity, y = log10(revenue))) +
+  geom_point(alpha = 0.5, color = "#3498db") +
+  geom_smooth(method = "lm", color = "#2c3e50", se = FALSE, linetype = "dashed") +
+  theme_minimal() +
+  labs(
+    title = "Movie Popularity vs. Revenue",
+    x = "TMDb Popularity Score",
+    y = "Log10(Revenue)"
+  ) +
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 14, face = "bold"),
+    axis.text = element_text(size = 12),
+    axis.title = element_text(size = 13, face = "bold")
+  )
+```
+
+## Revenue vs. Runtime
+```{r}
+ggplot(movies, aes(x = runtime, y = revenue)) +
+  geom_point(alpha = 0.5, color = "#3498db") +
+  geom_smooth(method = "lm", col = "#2c3e50", se = FALSE, linetype = "dashed") +
+  theme_minimal() +
+  labs(title = "Movie Runtime vs. Revenue",
+       x = "Runtime (minutes)",
        y = "Revenue") +
   theme(
     plot.title = element_text(hjust = 0.5, size = 14, face = "bold"),
-    legend.position = "none",
-    axis.text.x = element_text(face = "bold", size = 12)
-  )
+    axis.text = element_text(size = 12),
+    axis.title = element_text(size = 13, face = "bold")
+)
 
+ggplot(movies, aes(x = runtime, y = log10(revenue))) +
+  geom_point(alpha = 0.5, color = "#3498db") +
+  geom_smooth(method = "lm", col = "#2c3e50", se = FALSE, linetype = "dashed") +
+  theme_minimal() +
+  labs(title = "Movie Runtime vs. Revenue",
+       x = "Runtime (minutes)",
+       y = "Log10(Revenue)") +
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 14, face = "bold"),
+    axis.text = element_text(size = 12),
+    axis.title = element_text(size = 13, face = "bold")
+)
+```
+
+## Revenue vs. Release Season
+```{r}
 ggplot(movies, aes(x = season, y = log10(revenue), fill = season)) +
   geom_boxplot(alpha = 0.85, outlier.shape = 21, outlier.fill = "white", outlier.color = "black") +
   scale_fill_manual(values = c("Winter" = "#74b9ff",
@@ -440,6 +489,37 @@ ggplot(movies, aes(x = season, y = log10(revenue), fill = season)) +
     plot.title = element_text(hjust = 0.5, size = 14, face = "bold"),
     legend.position = "none",
     axis.text.x = element_text(face = "bold", size = 12)
+  )
+```
+
+## Revenue vs. Release Year
+```{r}
+library(lubridate)
+
+# Extract year from release date
+movies$release_year <- year(movies$release_date)
+
+# Compute average revenue per year
+yearly_revenue <- movies %>%
+  group_by(release_year) %>%
+  summarise(avg_revenue = mean(revenue, na.rm = TRUE), movie_count = n()) %>%
+  arrange(release_year)
+
+# Plot time series
+ggplot(yearly_revenue, aes(x = release_year, y = avg_revenue)) +
+  geom_line(color = "#e74c3c", size = 1.5) +  # Bold red line
+  geom_point(color = "#2c3e50", size = 3) +  # Dark gray dots
+  theme_minimal() +
+  labs(
+    title = "Average Movie Revenue Over Time",
+    x = "Release Year",
+    y = "Average Revenue ($)"
+  ) +
+  scale_y_continuous(labels = scales::dollar_format()) +  # Format revenue as dollars
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 16, face = "bold", color = "#2c3e50"),
+    axis.text = element_text(size = 12),
+    axis.title = element_text(size = 13, face = "bold")
   )
 ```
 
@@ -470,8 +550,8 @@ genre_colors <- c(
 
 # Prepare genre-specific revenue data
 genre_revenue <- movies %>%
-  select(starts_with("Action"):starts_with("War"), revenue) %>%
-  pivot_longer(cols = starts_with("Action"):starts_with("War"), names_to = "Genre", values_to = "Presence") %>%
+  select(starts_with("Action"):starts_with("Documentary"), revenue) %>%
+  pivot_longer(cols = starts_with("Action"):starts_with("Documentary"), names_to = "Genre", values_to = "Presence") %>%
   filter(Presence == 1)
 
 # Boxplot of revenue by genre
@@ -504,6 +584,198 @@ ggplot(movies, aes(x = actor_avg_pop, y = log10(revenue))) +
   theme(plot.title = element_text(hjust = 0.5, size = 14, face = "bold"))
 ```
 
+## Revenue vs. Crew's popularity
+```{r}
+ggplot(movies, aes(x = crew_avg_pop, y = log10(revenue))) +
+  geom_point(alpha = 0.5, color = "#e74c3c") +
+  geom_smooth(method = "lm", col = "#2c3e50", se = FALSE, linetype = "dashed") +
+  theme_minimal() +
+  labs(title = "Crew Popularity vs. Revenue",
+       x = "Average Crew Popularity",
+       y = "Log10(Revenue)") +
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 14, face = "bold"),
+    axis.text = element_text(size = 12),
+    axis.title = element_text(size = 13, face = "bold")
+  )
+```
+
+## Top actors with highest average revenue, total revenue, and movie count
+```{r}
+# Extract actor names without popularity score
+top_actors_total <- movies %>%
+  separate_rows(actors, sep = ", ") %>%
+  mutate(actor_name = str_extract(actors, "^[^(]+")) %>%  # Extract only the name, ignoring numbers
+  group_by(actor_name) %>%
+  summarise(total_revenue = sum(revenue, na.rm = TRUE)) %>%
+  arrange(desc(total_revenue)) %>%
+  slice_max(total_revenue, n = 20, with_ties = FALSE)  
+
+# Plot
+ggplot(top_actors_total, aes(x = reorder(actor_name, total_revenue), y = total_revenue, fill = total_revenue)) +
+  geom_bar(stat = "identity", alpha = 0.9) +
+  coord_flip() +
+  scale_fill_gradient(low = "#F5B7B1", high = "#922B21") +  # Light Pink → Deep Red
+  theme_minimal() +
+  labs(
+    title = "Top 20 Actors by Total Movie Revenue",
+    x = "Actor",
+    y = "Total Revenue ($)",
+    fill = "Total Revenue"
+  ) +
+  scale_y_continuous(labels = scales::dollar_format()) +  
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 16, face = "bold", color = "#641E16"),
+    axis.text.x = element_text(angle = 30, hjust = 1, size = 12),
+    axis.text.y = element_text(size = 12, face = "bold")
+  )
+
+
+# Extract top actors by average revenue per movie
+top_actors_avg <- movies %>%
+  separate_rows(actors, sep = ", ") %>%
+  mutate(actor_name = str_extract(actors, "^[^(]+")) %>%  
+  group_by(actor_name) %>%
+  summarise(avg_revenue = mean(revenue, na.rm = TRUE)) %>%
+  arrange(desc(avg_revenue)) %>%
+  slice_max(avg_revenue, n = 20, with_ties = FALSE)  
+
+# Plot
+ggplot(top_actors_avg, aes(x = reorder(actor_name, avg_revenue), y = avg_revenue, fill = avg_revenue)) +
+  geom_bar(stat = "identity", alpha = 0.9) +
+  coord_flip() +
+  scale_fill_gradient(low = "#F8DE7E", high = "#D4AC0D") +  # Light Gold → Deep Gold
+  theme_minimal() +
+  labs(
+    title = "Top 20 Actors by Average Movie Revenue",
+    x = "Actor",
+    y = "Average Revenue per Movie ($)",
+    fill = "Avg Revenue"
+  ) +
+  scale_y_continuous(labels = scales::dollar_format()) +  
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 16, face = "bold", color = "#7D6608"),
+    axis.text.x = element_text(angle = 30, hjust = 1, size = 12),
+    axis.text.y = element_text(size = 12, face = "bold")
+  )
+
+
+# Extract top actors by movie count
+top_actor_counts <- movies %>%
+  separate_rows(actors, sep = ", ") %>%
+  mutate(actor_name = str_extract(actors, "^[^(]+")) %>%  
+  group_by(actor_name) %>%
+  summarise(movie_count = n()) %>%
+  arrange(desc(movie_count)) %>%
+  slice_max(movie_count, n = 20, with_ties = FALSE)  
+
+# Plot
+ggplot(top_actor_counts, aes(x = reorder(actor_name, movie_count), y = movie_count, fill = movie_count)) +
+  geom_bar(stat = "identity", alpha = 0.9) +
+  coord_flip() +
+  scale_fill_gradient(low = "#FAD7A0", high = "#D35400") +  # Light Orange → Deep Orange
+  theme_minimal() +
+  labs(
+    title = "Top 20 Actors by Number of Movies",
+    x = "Actor",
+    y = "Movie Count",
+    fill = "Movie Count"
+  ) +
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 16, face = "bold", color = "#B34700"),
+    axis.text.x = element_text(angle = 30, hjust = 1, size = 12),
+    axis.text.y = element_text(size = 12, face = "bold")
+  )
+```
+
+## Top crews with highest average revenue, total revenue, and movie count
+```{r}
+# Extract top crew members by total revenue
+top_crew_total <- movies %>%
+  separate_rows(crews, sep = ", ") %>%
+  mutate(crew_name = str_extract(crews, "^[^(]+")) %>%  
+  group_by(crew_name) %>%
+  summarise(total_revenue = sum(revenue, na.rm = TRUE)) %>%
+  arrange(desc(total_revenue)) %>%
+  slice_max(total_revenue, n = 20, with_ties = FALSE)  
+
+# Plot
+ggplot(top_crew_total, aes(x = reorder(crew_name, total_revenue), y = total_revenue, fill = total_revenue)) +
+  geom_bar(stat = "identity", alpha = 0.9) +
+  coord_flip() +
+  scale_fill_gradient(low = "#A2D9CE", high = "#117A65") +  # Light Teal → Deep Green
+  theme_minimal() +
+  labs(
+    title = "Top 20 Crew Members by Total Movie Revenue",
+    x = "Crew Member",
+    y = "Total Revenue ($)",
+    fill = "Total Revenue"
+  ) +
+  scale_y_continuous(labels = scales::dollar_format()) +  
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 16, face = "bold", color = "#154360"),
+    axis.text.x = element_text(angle = 30, hjust = 1, size = 12),
+    axis.text.y = element_text(size = 12, face = "bold")
+  )
+
+
+# Extract top crew members by average revenue per movie
+top_crew_avg <- movies %>%
+  separate_rows(crews, sep = ", ") %>%
+  mutate(crew_name = str_extract(crews, "^[^(]+")) %>%  
+  group_by(crew_name) %>%
+  summarise(avg_revenue = mean(revenue, na.rm = TRUE)) %>%
+  arrange(desc(avg_revenue)) %>%
+  slice_max(avg_revenue, n = 20, with_ties = FALSE)  
+
+# Plot
+ggplot(top_crew_avg, aes(x = reorder(crew_name, avg_revenue), y = avg_revenue, fill = avg_revenue)) +
+  geom_bar(stat = "identity", alpha = 0.9) +
+  coord_flip() +
+  scale_fill_gradient(low = "#85C1E9", high = "#1B4F72") +  # Light Blue → Deep Blue
+  theme_minimal() +
+  labs(
+    title = "Top 20 Crew Members by Average Movie Revenue",
+    x = "Crew Member",
+    y = "Average Revenue per Movie ($)",
+    fill = "Avg Revenue"
+  ) +
+  scale_y_continuous(labels = scales::dollar_format()) +  
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 16, face = "bold", color = "#154360"),
+    axis.text.x = element_text(angle = 30, hjust = 1, size = 12),
+    axis.text.y = element_text(size = 12, face = "bold")
+  )
+
+
+# Extract top crew members by movie count
+top_crew_counts <- movies %>%
+  separate_rows(crews, sep = ", ") %>%
+  mutate(crew_name = str_extract(crews, "^[^(]+")) %>%  
+  group_by(crew_name) %>%
+  summarise(movie_count = n()) %>%
+  arrange(desc(movie_count)) %>%
+  slice_max(movie_count, n = 20, with_ties = FALSE)  
+
+# Plot
+ggplot(top_crew_counts, aes(x = reorder(crew_name, movie_count), y = movie_count, fill = movie_count)) +
+  geom_bar(stat = "identity", alpha = 0.9) +
+  coord_flip() +
+  scale_fill_gradient(low = "#D7BDE2", high = "#6C3483") +  # Light Purple → Deep Violet
+  theme_minimal() +
+  labs(
+    title = "Top 20 Crew Members by Number of Movies",
+    x = "Crew Member",
+    y = "Movie Count",
+    fill = "Movie Count"
+  ) +
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 16, face = "bold", color = "#512E5F"),
+    axis.text.x = element_text(angle = 30, hjust = 1, size = 12),
+    axis.text.y = element_text(size = 12, face = "bold")
+  )
+```
+
 ## Correlation heatmap of key numeric variables
 ```{r}
 # Select only numerical columns
@@ -529,5 +801,27 @@ ggcorrplot(corr_matrix, method = "square",
   labs(title = "Correlation Heatmap: Movie Revenue vs Predictors")
 ```
 
-## continue visualizing the rest predictors and additional?
+# Some statistical analysis
 
+## Linear relationship analysis for numeric predictors
+```{r}
+lm_model <- lm(log10(revenue) ~ log10(budget) + popularity + runtime + actor_avg_pop + crew_avg_pop, data = movies)
+
+summary(lm_model)
+```
+
+## Linear relationship analysis for each genre
+```{r}
+lm_model <- lm(
+  log10(revenue) ~ Action + Adventure + Fantasy + `Science Fiction` + Drama + Romance + 
+    Animation + Comedy + Family + Thriller + Crime + History + Music + War + 
+    Mystery + Horror + Western + Documentary, 
+  data = movies
+)
+
+summary(lm_model)
+```
+```{r}
+anova_model <- aov(log10(revenue) ~ season, data = movies)
+summary(anova_model)
+```

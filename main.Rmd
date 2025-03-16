@@ -16,7 +16,7 @@ Plan:
   - non-casts (and their popularity?)
   
 ```{r setup, eval = FALSE}
-!install.packages(c("httr", "dplyr", "jsonlite", "progress", "dplyr", "tidyr", "ggplot2", "knitr", "ggcorrplot", "stringr", "xgboost"))
+!install.packages(c("httr", "dplyr", "jsonlite", "progress", "dplyr", "tidyr", "ggplot2", "knitr", "ggcorrplot", "stringr", "xgboost", "lubridate"))
 ```
 
 ```{r library}
@@ -31,6 +31,7 @@ library(knitr)
 library(ggcorrplot)
 library(stringr)
 library(xgboost)
+library(lubridate)
 ```
 
 ```{r constants}
@@ -320,6 +321,19 @@ movies <- filter(movies, runtime != 4)
 summary(movies$runtime)
 ```
 
+## Check movies released in 2025
+```{r}
+movies[movies$release_year == 2025,]
+```
+
+```{r}
+# Extract year from release date
+movies$release_year <- year(movies$release_date)
+movies <- filter(movies, release_year != 2025)
+```
+
+Since there are only two movies from 2025, we're going to remove movies from 2025 so that our analysis is not biased
+
 ## Check the dimension, header, and footer of our cleaned dataset
 ```{r}
 cat("Shape of movies: ", dim(movies), "\n")
@@ -343,9 +357,9 @@ levels(movies$season)
 
 ## Convert `genres` into one-hot encoding
 ```{r}
-movies <- movies %>%
-  separate_rows(genres, sep = ",") %>%
-  mutate(value = 1) %>%
+movies <- movies |>
+  separate_rows(genres, sep = ",") |>
+  mutate(value = 1) |>
   pivot_wider(names_from = genres, values_from = value, values_fill = list(value = 0))
 ```
 
@@ -446,31 +460,19 @@ ggplot(movies, aes(x = popularity, y = log10(revenue))) +
 
 ## Revenue vs. Runtime
 ```{r}
-ggplot(movies, aes(x = runtime, y = revenue)) +
-  geom_point(alpha = 0.5, color = "#3498db") +
-  geom_smooth(method = "lm", col = "#2c3e50", se = FALSE, linetype = "dashed") +
-  theme_minimal() +
-  labs(title = "Movie Runtime vs. Revenue",
-       x = "Runtime (minutes)",
-       y = "Revenue") +
-  theme(
-    plot.title = element_text(hjust = 0.5, size = 14, face = "bold"),
-    axis.text = element_text(size = 12),
-    axis.title = element_text(size = 13, face = "bold")
-)
-
 ggplot(movies, aes(x = runtime, y = log10(revenue))) +
-  geom_point(alpha = 0.5, color = "#3498db") +
-  geom_smooth(method = "lm", col = "#2c3e50", se = FALSE, linetype = "dashed") +
+  geom_point(alpha = 0.6, color = "#E74C3C") +  # Vibrant Coral Red
+  geom_smooth(method = "lm", color = "#2c3e50", se = FALSE, linetype = "dashed") +
   theme_minimal() +
   labs(title = "Movie Runtime vs. Revenue",
        x = "Runtime (minutes)",
        y = "Log10(Revenue)") +
   theme(
     plot.title = element_text(hjust = 0.5, size = 14, face = "bold"),
-    axis.text = element_text(size = 12),
+    axis.text = element_text(size = 12),  
     axis.title = element_text(size = 13, face = "bold")
-)
+  )
+
 ```
 
 ## Revenue vs. Release Season
@@ -494,15 +496,10 @@ ggplot(movies, aes(x = season, y = log10(revenue), fill = season)) +
 
 ## Revenue vs. Release Year
 ```{r}
-library(lubridate)
-
-# Extract year from release date
-movies$release_year <- year(movies$release_date)
-
 # Compute average revenue per year
-yearly_revenue <- movies %>%
-  group_by(release_year) %>%
-  summarise(avg_revenue = mean(revenue, na.rm = TRUE), movie_count = n()) %>%
+yearly_revenue <- movies |>
+  group_by(release_year) |>
+  summarise(avg_revenue = mean(revenue, na.rm = TRUE), movie_count = n()) |>
   arrange(release_year)
 
 # Plot time series
@@ -549,9 +546,9 @@ genre_colors <- c(
 )
 
 # Prepare genre-specific revenue data
-genre_revenue <- movies %>%
-  select(starts_with("Action"):starts_with("Documentary"), revenue) %>%
-  pivot_longer(cols = starts_with("Action"):starts_with("Documentary"), names_to = "Genre", values_to = "Presence") %>%
+genre_revenue <- movies |>
+  select(starts_with("Action"):starts_with("Documentary"), revenue) |>
+  pivot_longer(cols = starts_with("Action"):starts_with("Documentary"), names_to = "Genre", values_to = "Presence") |>
   filter(Presence == 1)
 
 # Boxplot of revenue by genre
@@ -570,6 +567,15 @@ ggplot(genre_revenue, aes(x = reorder(Genre, log10(revenue), FUN = median), y = 
     axis.text.y = element_text(face = "bold", size = 10)
   )
 
+```
+
+```{r}
+highest_history_movie <- movies |>
+  filter(History == 1) |>
+  arrange(desc(revenue)) |>
+  slice_max(revenue, n = 1) 
+
+highest_history_movie
 ```
 
 ## Revenue vs. Actor's popularity
@@ -603,12 +609,12 @@ ggplot(movies, aes(x = crew_avg_pop, y = log10(revenue))) +
 ## Top actors with highest average revenue, total revenue, and movie count
 ```{r}
 # Extract actor names without popularity score
-top_actors_total <- movies %>%
-  separate_rows(actors, sep = ", ") %>%
-  mutate(actor_name = str_extract(actors, "^[^(]+")) %>%  # Extract only the name, ignoring numbers
-  group_by(actor_name) %>%
-  summarise(total_revenue = sum(revenue, na.rm = TRUE)) %>%
-  arrange(desc(total_revenue)) %>%
+top_actors_total <- movies |>
+  separate_rows(actors, sep = ", ") |>
+  mutate(actor_name = str_extract(actors, "^[^(]+")) |>  # Extract only the name, ignoring numbers
+  group_by(actor_name) |>
+  summarise(total_revenue = sum(revenue, na.rm = TRUE)) |>
+  arrange(desc(total_revenue)) |>
   slice_max(total_revenue, n = 20, with_ties = FALSE)  
 
 # Plot
@@ -632,12 +638,12 @@ ggplot(top_actors_total, aes(x = reorder(actor_name, total_revenue), y = total_r
 
 
 # Extract top actors by average revenue per movie
-top_actors_avg <- movies %>%
-  separate_rows(actors, sep = ", ") %>%
-  mutate(actor_name = str_extract(actors, "^[^(]+")) %>%  
-  group_by(actor_name) %>%
-  summarise(avg_revenue = mean(revenue, na.rm = TRUE)) %>%
-  arrange(desc(avg_revenue)) %>%
+top_actors_avg <- movies |>
+  separate_rows(actors, sep = ", ") |>
+  mutate(actor_name = str_extract(actors, "^[^(]+")) |>  
+  group_by(actor_name) |>
+  summarise(avg_revenue = mean(revenue, na.rm = TRUE)) |>
+  arrange(desc(avg_revenue)) |>
   slice_max(avg_revenue, n = 20, with_ties = FALSE)  
 
 # Plot
@@ -661,12 +667,12 @@ ggplot(top_actors_avg, aes(x = reorder(actor_name, avg_revenue), y = avg_revenue
 
 
 # Extract top actors by movie count
-top_actor_counts <- movies %>%
-  separate_rows(actors, sep = ", ") %>%
-  mutate(actor_name = str_extract(actors, "^[^(]+")) %>%  
-  group_by(actor_name) %>%
-  summarise(movie_count = n()) %>%
-  arrange(desc(movie_count)) %>%
+top_actor_counts <- movies |>
+  separate_rows(actors, sep = ", ") |>
+  mutate(actor_name = str_extract(actors, "^[^(]+")) |>  
+  group_by(actor_name) |>
+  summarise(movie_count = n()) |>
+  arrange(desc(movie_count)) |>
   slice_max(movie_count, n = 20, with_ties = FALSE)  
 
 # Plot
@@ -691,12 +697,12 @@ ggplot(top_actor_counts, aes(x = reorder(actor_name, movie_count), y = movie_cou
 ## Top crews with highest average revenue, total revenue, and movie count
 ```{r}
 # Extract top crew members by total revenue
-top_crew_total <- movies %>%
-  separate_rows(crews, sep = ", ") %>%
-  mutate(crew_name = str_extract(crews, "^[^(]+")) %>%  
-  group_by(crew_name) %>%
-  summarise(total_revenue = sum(revenue, na.rm = TRUE)) %>%
-  arrange(desc(total_revenue)) %>%
+top_crew_total <- movies |>
+  separate_rows(crews, sep = ", ") |>
+  mutate(crew_name = str_extract(crews, "^[^(]+")) |>  
+  group_by(crew_name) |>
+  summarise(total_revenue = sum(revenue, na.rm = TRUE)) |>
+  arrange(desc(total_revenue)) |>
   slice_max(total_revenue, n = 20, with_ties = FALSE)  
 
 # Plot
@@ -720,12 +726,12 @@ ggplot(top_crew_total, aes(x = reorder(crew_name, total_revenue), y = total_reve
 
 
 # Extract top crew members by average revenue per movie
-top_crew_avg <- movies %>%
-  separate_rows(crews, sep = ", ") %>%
-  mutate(crew_name = str_extract(crews, "^[^(]+")) %>%  
-  group_by(crew_name) %>%
-  summarise(avg_revenue = mean(revenue, na.rm = TRUE)) %>%
-  arrange(desc(avg_revenue)) %>%
+top_crew_avg <- movies |>
+  separate_rows(crews, sep = ", ") |>
+  mutate(crew_name = str_extract(crews, "^[^(]+")) |>  
+  group_by(crew_name) |>
+  summarise(avg_revenue = mean(revenue, na.rm = TRUE)) |>
+  arrange(desc(avg_revenue)) |>
   slice_max(avg_revenue, n = 20, with_ties = FALSE)  
 
 # Plot
@@ -749,12 +755,12 @@ ggplot(top_crew_avg, aes(x = reorder(crew_name, avg_revenue), y = avg_revenue, f
 
 
 # Extract top crew members by movie count
-top_crew_counts <- movies %>%
-  separate_rows(crews, sep = ", ") %>%
-  mutate(crew_name = str_extract(crews, "^[^(]+")) %>%  
-  group_by(crew_name) %>%
-  summarise(movie_count = n()) %>%
-  arrange(desc(movie_count)) %>%
+top_crew_counts <- movies |>
+  separate_rows(crews, sep = ", ") |>
+  mutate(crew_name = str_extract(crews, "^[^(]+")) |>  
+  group_by(crew_name) |>
+  summarise(movie_count = n()) |>
+  arrange(desc(movie_count)) |>
   slice_max(movie_count, n = 20, with_ties = FALSE)  
 
 # Plot

@@ -16,10 +16,10 @@ Plan:
   - non-casts (and their popularity?)
   
 ```{r setup, eval = FALSE}
-!install.packages(c("httr", "dplyr", "jsonlite", "progress", "dplyr", "tidyr", "ggplot2", "knitr", "ggcorrplot", "stringr", "xgboost", "lubridate"))
+!install.packages(c("httr", "dplyr", "jsonlite", "progress", "dplyr", "tidyr", "ggplot2", "knitr", "ggcorrplot", "stringr", "xgboost", "lubridate", "randomForest", "forcats", "plotly"))
 ```
 
-```{r library}
+```{r library, message = FALSE}
 library(httr)
 library(dplyr)
 library(jsonlite)
@@ -32,6 +32,14 @@ library(ggcorrplot)
 library(stringr)
 library(xgboost)
 library(lubridate)
+library(randomForest)
+library(forcats)
+library(xgboost)
+library(plotly)
+```
+
+```{r seed}
+set.seed(42)
 ```
 
 ```{r constants}
@@ -50,6 +58,7 @@ response <- GET(
   url = paste0(BASE_URL, DISCOVER_MOVIE_PATH),
   query = list(
     sort_by = "revenue.desc",
+    release_date.lte = "2025-04-25",
     api_key = API_KEY
   )
 )
@@ -60,6 +69,24 @@ movie_total_pages <- content(response)$total_pages
 cat("There are", movie_total_results, "movies in total provided by the API.\n")
 cat("These movies are paginated into", movie_total_pages, "pages", "with", MOVIES_PER_PAGE, "movies per page.\n")
 ```
+
+```{r}
+# response <- GET(
+#   url = paste0(BASE_URL, DISCOVER_MOVIE_PATH),
+#   query = list(
+#     sort_by = "revenue.desc",
+#     release_date.lte = "2025-04-25",
+#     api_key = API_KEY
+#   )
+# )
+# 
+# movie_total_results <- content(response)$total_results
+# movie_total_pages <- content(response)$total_pages
+# 
+# cat("There are", movie_total_results, "movies in total provided by the API.\n")
+# cat("These movies are paginated into", movie_total_pages, "pages", "with", MOVIES_PER_PAGE, "movies per page.\n")
+```
+
 ## Fetch movie ids and titles
 ```{r}
 movies <- data.frame()
@@ -359,8 +386,84 @@ levels(movies$season)
 ```{r}
 movies <- movies |>
   separate_rows(genres, sep = ",") |>
+  filter(genres != "") |>
   mutate(value = 1) |>
   pivot_wider(names_from = genres, values_from = value, values_fill = list(value = 0))
+```
+
+## 
+```{r}
+# Take only movies from 1947 since the data for CPI starts from 1947
+cpi <- read.csv("CPIAUCSL.csv")
+cpi$observation_month <- as.numeric(substring(cpi$observation_date, 6, 7))
+cpi$observation_year <- as.numeric(substring(cpi$observation_date, 1, 4))
+movies$release_month <- as.numeric(substring(movies$release_date, 6, 7))
+movies <- filter(movies, release_year >= 1946) |>
+  left_join(cpi, by = c("release_year" = "observation_year", "release_month" = "observation_month"))
+# Check if there are any missing values after the join
+missing_values <- movies[!complete.cases(movies), ]
+missing_values
+```
+
+## Budget time series before accounting for inflation
+```{r}
+# Compute average revenue per year
+yearly_budget <- movies |>
+  group_by(release_year) |>
+  summarise(avg_budget = mean(budget, na.rm = TRUE), movie_count = n()) |>
+  arrange(release_year)
+
+# Plot time series
+ggplot(yearly_budget, aes(x = release_year, y = avg_budget)) +
+  geom_line(color = "#e74c3c", size = 1.5) +  # Bold red line
+  geom_point(color = "#2c3e50", size = 3) +  # Dark gray dots
+  theme_minimal() +
+  labs(
+    title = "Average Movie Budget Over Time",
+    x = "Release Year",
+    y = "Average Budget ($)"
+  ) +
+  scale_y_continuous(labels = scales::dollar_format()) +  # Format revenue as dollars
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 16, face = "bold", color = "#2c3e50"),
+    axis.text = element_text(size = 12),
+    axis.title = element_text(size = 13, face = "bold")
+  )
+```
+
+## Adjust inflation for budget (can't do for revenue since it mostly includes re-releases)
+```{r}
+# Get largest release date to convert to
+latest_release_date <- max(movies$release_date, na.rm = TRUE)
+latest_release_month <- as.numeric(substring(latest_release_date, 6, 7))
+latest_release_year <- as.numeric(substring(latest_release_date, 1, 4))
+# Adjust budget for inflation
+cpi_latest <- filter(cpi, observation_year == latest_release_year & observation_month == latest_release_month)$CPIAUCSL
+movies <- movies |>
+  mutate(budget = budget * (cpi_latest / CPIAUCSL))
+
+# Replot the time series for budget
+yearly_budget <- movies |>
+  group_by(release_year) |>
+  summarise(avg_budget = mean(budget, na.rm = TRUE), movie_count = n()) |>
+  arrange(release_year)
+
+# Plot time series
+ggplot(yearly_budget, aes(x = release_year, y = avg_budget)) +
+  geom_line(color = "#e74c3c", size = 1.5) +  # Bold red line
+  geom_point(color = "#2c3e50", size = 3) +  # Dark gray dots
+  theme_minimal() +
+  labs(
+    title = "Average Movie Budget Over Time",
+    x = "Release Year",
+    y = "Average Budget ($)"
+  ) +
+  scale_y_continuous(labels = scales::dollar_format()) +  # Format revenue as dollars
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 16, face = "bold", color = "#2c3e50"),
+    axis.text = element_text(size = 12),
+    axis.title = element_text(size = 13, face = "bold")
+  )
 ```
 
 ## Check the dimension, NA values, header, and footer of our cleaned dataset
@@ -369,6 +472,16 @@ cat("Shape of movies: ", dim(movies), "\n")
 cat("Total number of missing values across all columns =", sum(colSums(is.na(movies))), "\n")
 head(movies)
 tail(movies)
+```
+
+## Store the cleaned dataset
+```{r}
+store_movies <- movies
+store_movies[] <- lapply(movies, function(x) {
+  if (is.character(x)) Encoding(x) <- "UTF-8"
+  return(x)
+})
+saveRDS(store_movies, file = "movies_cleaned.rds")
 ```
 
 # Exploratory data analysis (EDA)
@@ -827,7 +940,227 @@ lm_model <- lm(
 
 summary(lm_model)
 ```
+
+## ANOVA for categorical predictors
 ```{r}
 anova_model <- aov(log10(revenue) ~ season, data = movies)
 summary(anova_model)
+```
+
+# Build Random Forest model
+
+## Verify variable names and types
+```{r}
+str(movies)
+```
+
+## Preprocess data for Random Forest
+```{r}
+rf_data <- movies |>
+  mutate(
+    log_revenue = log10(revenue),
+    log_budget = log10(budget),
+  ) |>
+  rename(Science_Fiction = `Science Fiction`) |>
+  drop_na()  # Ensure no missing values
+
+n <- nrow(rf_data)
+train_idx <- sample(1:n, size = 0.8 * n)
+train <- rf_data[train_idx, ]
+test <- rf_data[-train_idx, ]
+```
+
+## Train Random Forest model
+```{r}
+rf_model <- randomForest(
+  log_revenue ~ 
+    log_budget + popularity + runtime + actor_avg_pop + crew_avg_pop + season +
+    Adventure + Fantasy + Science_Fiction + Animation + Action + Family + War +
+    Thriller + Comedy + Romance + Mystery + Drama + Music + Crime + Horror +
+    Western + Documentary + History,
+  data = train,
+  ntree = 500,
+  importance = TRUE
+)
+print(rf_model)
+```
+
+## Evaluate model
+```{r}
+pred <- predict(rf_model, newdata = test)
+true <- test$log_revenue
+
+r_squared <- 1 - sum((pred - true)^2) / sum((true - mean(true))^2)
+rmse <- sqrt(mean((pred - true)^2))
+
+cat("R-squared:", round(r_squared, 3), "\n")
+cat("RMSE:", round(rmse, 3), "\n")
+
+varImpPlot(rf_model, main = "Random Forest Feature Importance")
+```
+
+## Function to predict revenue on original scale using Random Forest
+```{r}
+rf_predict <- function(newdata) {
+  log_prediction <- predict(rf_model, newdata)
+  10^log_prediction # Convert back to original scale
+}
+```
+
+## Function to plot predictions
+```{r}
+evaluate_model_predictions <- function(model, test_data, title_col = "title", revenue_col = "revenue") {
+  test <- test_data %>%
+    mutate(
+      predicted_log_revenue = predict(model, newdata = test_data),
+      actual_log_revenue = log10(.data[[revenue_col]]),
+      residual = actual_log_revenue - predicted_log_revenue
+    )
+  
+  top50 <- test %>%
+    arrange(desc(.data[[revenue_col]])) %>%
+    slice_head(n = 50) %>%
+    mutate(
+      title = fct_reorder(.data[[title_col]], actual_log_revenue),
+      label_actual = paste0("Title: ", .data[[title_col]], 
+                            "\nActual log-revenue: ", round(actual_log_revenue, 2)),
+      label_pred = paste0("Title: ", .data[[title_col]], 
+                          "\nPredicted log-revenue: ", round(predicted_log_revenue, 2))
+    )
+  
+  return(top50)
+}
+
+plot_prediction_comparison <- function(top50_df) {
+  gg <- ggplot(top50_df, aes(x = title)) +
+    geom_point(aes(y = actual_log_revenue, text = label_actual), color = "black") +
+    geom_point(aes(y = predicted_log_revenue, text = label_pred), color = "red") +
+    geom_segment(aes(y = predicted_log_revenue, yend = actual_log_revenue, xend = title), 
+                 color = "gray", linetype = "dashed") +
+    coord_flip() +
+    theme_minimal() +
+    labs(
+      title = "Actual vs Predicted Log Revenue (Top 50 Grossing Films)",
+      x = "Movie Title",
+      y = "Log10(Revenue)"
+    )
+  
+  ggplotly(gg, tooltip = "text", height = 1500, width = 900)
+}
+```
+
+```{r}
+top50_rf <- evaluate_model_predictions(rf_model, test)
+plot_prediction_comparison(top50_rf)
+```
+
+
+# Build XGBoost model
+
+## Preprocess data for XGBoost
+```{r}
+xgb_data <- movies %>%
+  mutate(
+    log_budget = log10(budget),
+    log_revenue = log10(revenue)
+  ) %>%
+  select(
+    -c(movie_id, title, release_date, actors, crews, budget, revenue,
+       release_month, release_year, observation_date, CPIAUCSL)
+  ) %>%
+  drop_na()
+
+# Convert categorical/factor to dummies (season and genres)
+xgb_matrix <- model.matrix(~ . - log_revenue, data = xgb_data)[, -1]  # remove intercept
+
+# Labels
+xgb_labels <- xgb_data$log_revenue
+
+# Train/test split
+n <- nrow(xgb_matrix)
+train_idx <- sample(1:n, size = 0.8 * n)
+xgb_train <- xgb_matrix[train_idx, ]
+xgb_test <- xgb_matrix[-train_idx, ]
+y_train <- xgb_labels[train_idx]
+y_test <- xgb_labels[-train_idx]
+```
+
+## Train XGBoost model
+```{r}
+xgb_model <- xgboost(
+  data = xgb_train,
+  label = y_train,
+  nrounds = 100,
+  objective = "reg:squarederror",
+  max_depth = 6,
+  eta = 0.1,
+  subsample = 0.8,
+  colsample_bytree = 0.8,
+  verbose = 0
+)
+```
+
+## Evaluate model
+```{r}
+xgb_pred <- predict(xgb_model, newdata = xgb_test)
+
+r_squared_xgb <- 1 - sum((xgb_pred - y_test)^2) / sum((y_test - mean(y_test))^2)
+rmse_xgb <- sqrt(mean((xgb_pred - y_test)^2))
+
+cat("XGBoost R-squared:", round(r_squared_xgb, 3), "\n")
+cat("XGBoost RMSE:", round(rmse_xgb, 3), "\n")
+```
+
+## Feature Importance Plot
+```{r}
+importance <- xgb.importance(model = xgb_model)
+xgb.plot.importance(importance_matrix = importance, top_n = 20)
+```
+
+## Function to predict revenue on original scale using XGBoost
+```{r}
+predict_movie_revenue_xgb <- function(newdata_matrix) {
+  log_pred <- predict(xgb_model, newdata = newdata_matrix)
+  10^log_pred
+}
+```
+
+## Function to evaluate model predictions for XGBoost
+```{r}
+evaluate_model_predictions_xgb <- function(model, test_matrix, original_df, title_col = "title", revenue_col = "revenue") {
+  # Make predictions
+  predicted_log_revenue <- predict(model, newdata = test_matrix)
+  
+  # Add predictions back to the original test data
+  test <- original_df %>%
+    filter(complete.cases(.)) %>%
+    slice(-train_idx) %>%  # Use the same test rows
+    mutate(
+      predicted_log_revenue = predicted_log_revenue,
+      actual_log_revenue = log10(.data[[revenue_col]]),
+      residual = actual_log_revenue - predicted_log_revenue
+    ) %>%
+    arrange(desc(.data[[revenue_col]])) %>%
+    slice_head(n = 50) %>%
+    mutate(
+      title = fct_reorder(.data[[title_col]], actual_log_revenue),
+      label_actual = paste0("Title: ", .data[[title_col]], 
+                            "\nActual log-revenue: ", round(actual_log_revenue, 2)),
+      label_pred = paste0("Title: ", .data[[title_col]], 
+                          "\nPredicted log-revenue: ", round(predicted_log_revenue, 2))
+    )
+  
+  return(test)
+}
+```
+
+## Plot predictions for XGBoost
+```{r}
+top50_xgb <- evaluate_model_predictions_xgb(
+  model = xgb_model,
+  test_matrix = xgb_test,
+  original_df = movies
+)
+
+plot_prediction_comparison(top50_xgb)
 ```

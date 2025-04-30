@@ -1,0 +1,19 @@
+name: "Movie Revenue Analysis"
+navbar:
+  title: "Movie Revenue Analysis"
+  left:
+    - text: "Introduction"
+      href: introduction.html
+    - text: "Methods"
+      href: methods.html
+    - text: "Interactive EDA"
+      href: interactive-eda.html
+    - text: "Conclusion"
+      href: conclusions.html
+output_dir: "."
+rmd_files: 
+  - index.Rmd
+  - introduction.Rmd
+  - methods.Rmd
+  - interactive-eda.Rmd
+  - conclusions.Rmd

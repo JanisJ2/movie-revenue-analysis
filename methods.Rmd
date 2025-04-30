@@ -1,0 +1,57 @@
+---
+title: "Methods"
+output:
+  html_document:
+    theme: flatly
+    highlight: textmate
+    css: styles.css
+---
+
+This section outlines how the data was collected, cleaned, and analyzed prior to modeling.
+
+# Data Collection
+
+The data was collected from [The Movie Database (TMDB) API](https://developer.themoviedb.org/docs/getting-started) using three main endpoints:
+
+- `/discover/movie`: to fetch batches of movie IDs sorted by descending revenue, capturing the top 1,000 grossing movies.
+- `/movie/{movie_id}`: to extract revenue, budget, popularity, release date, runtime, and genre information.
+- `/movie/{movie_id}/credits`: to get up to five cast and crew members for each film, which were used to compute average actor and crew popularity.
+
+TMDB enforces strong quality controls via its [Contribution Bible](https://www.themoviedb.org/bible/general), making it a reliable metadata source. API calls were authenticated and paginated until the desired number of movies was retrieved.
+
+# Data Cleaning & Wrangling
+
+Once collected, the data was cleaned and preprocessed as follows:
+
+- Converted release dates to `Date` format.
+- Removed rows with missing or invalid values (e.g., zero budget or runtime).
+- Excluded adult films (all were labeled `FALSE` in this dataset).
+- One-hot encoded genres into binary indicators (e.g., Action, Comedy).
+- Created a new `season` variable (Spring, Summer, Fall, Winter) from the release month.
+- Adjusted budget for inflation using monthly [CPI data](https://fred.stlouisfed.org/series/CPIAUCSL) from FRED. Budgets were scaled to the most recent CPI value. Revenue was left unadjusted due to complications from re-releases, which often occur years later and are difficult to track consistently.
+
+# Exploratory Data Analysis (EDA)
+
+Before modeling, exploratory analysis was conducted to better understand the data:
+
+- Summary statistics and distribution plots for key numeric variables.
+- Scatter plots between revenue and predictors like budget, popularity, and runtime.
+- Boxplots comparing revenue across seasons and genres.
+- Time series plot showing trends in average revenue by release year.
+- Correlation heatmap among numeric variables to assess multicollinearity.
+
+# Statistical Modeling
+
+Two classical modeling techniques were used:
+
+1. **Linear regression** on `log10(revenue)` using numeric predictors (budget, popularity, runtime, actor/crew popularity) and genre indicators.
+2. **ANOVA** to assess whether average revenue significantly differs across seasons.
+
+# Predictive Modeling
+
+To capture more complex relationships, two machine learning models were also implemented:
+
+- **Random Forest**: Used the `randomForest` R package with 500 trees and default settings. This model is robust to multicollinearity and provides feature importance metrics.
+- **XGBoost**: Trained with 100 rounds, max depth of 6, learning rate (`eta`) of 0.1, and subsampling of 80%. Input data was fully numeric with one-hot encoded categorical variables.
+
+Both models used an 80/20 train-test split. Performance was evaluated using R-squared and RMSE. These models complement the statistical analysis by capturing nonlinear interactions and improving predictive accuracy.

@@ -1,0 +1,49 @@
+---
+title: "Conclusion"
+output:
+  html_document:
+    theme: flatly
+    highlight: textmate
+    css: styles.css
+---
+
+This project explored factors influencing box office revenue using data from The Movie Database (TMDB) API. Through a combination of exploratory analysis, statistical modeling, and machine learning, I examined how attributes like budget, popularity, runtime, season, genre, and actor/crew popularity relate to a film’s financial success.
+
+# Key Takeaways
+
+- **Budget** is the most consistent and influential predictor of revenue. Higher budgets enable larger-scale productions, better marketing, and wider distribution—all of which contribute to financial returns.
+
+- **Popularity** (as measured by TMDB) and **runtime** also showed strong and consistent positive effects.
+
+- **Actor popularity** had visual correlation with revenue but was not statistically significant after controlling for other variables—suggesting its effects may be indirect or confounded by other factors like budget or franchise involvement. On the other hand, **crew popularity** showed no significant relationship with revenue, both visually in scatterplots and statistically in the regression analysis.
+
+- **Genres** mattered: Adventure, Sci-Fi, and Animation were positively associated with revenue, while Comedy, History, and Horror tended to earn less. These patterns may reflect broader audience appeal and global marketability of certain genres.
+
+- **Seasonal release timing** plays a role. Movies released in Spring and Summer, which often align with holidays and school breaks, tend to earn more.
+
+# Model Comparison
+
+Three models were used to predict log-revenue:
+
+| Model            | R-squared | RMSE |
+|------------------|:---------:|:----:|
+| Linear Regression|   0.28    | 0.19 |
+| Random Forest    |   0.33    | 0.17 |
+| XGBoost          |   0.41    | 0.17 |
+
+XGBoost outperformed both Random Forest and linear regression, but even the best model explained only about 41% of the variance in revenue—highlighting the limits of metadata-based prediction.
+
+# Limitations
+
+- **Actor/Crew Metadata**: Only the top 5 actors/crew were used per movie. A more complete cast/crew profile might improve predictions but adds API complexity.
+
+- **Popularity Timing**: TMDB popularity is often computed post-release based on user interactions. For pre-release predictions, this metric may not be available or reliable—requiring a separate model to predict popularity beforehand.
+
+- **Unobserved Variables**: Revenue is influenced by many factors not captured here—such as marketing budget, critical reviews, franchise loyalty, or social media buzz—all of which are hard to quantify.
+
+- **Inflation Handling**: Budget was adjusted for inflation, but revenue was not, due to re-releases occurring over multiple years. This was deemed too complex to model cleanly within the project scope.
+
+# Final Thoughts
+
+This analysis demonstrates that while machine learning models like XGBoost can offer improved accuracy, their performance is ultimately constrained by the data available. Metadata alone cannot capture the full magic—or market forces—behind box office success. Still, with thoughtful feature engineering and creative modeling, we can get closer to understanding what makes a movie resonate with audiences.
+

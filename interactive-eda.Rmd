@@ -1,0 +1,360 @@
+---
+title: "Interactive EDA"
+output:
+  html_document:
+    theme: flatly
+    highlight: textmate
+    css: styles.css
+---
+
+This page presents a set of interactive visualizations that allow you to explore key patterns in the dataset used for our box office revenue prediction project. While the full results and statistical modeling are detailed in the accompanying [PDF report](index.html#pdf-report), the visualizations below provide an engaging way to examine trends, relationships, and distributions across various predictors. Hover over points and elements to see more details.
+
+```{r message=FALSE, warning=FALSE, echo = FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
+
+library(httr)
+library(dplyr)
+library(jsonlite)
+library(progress)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(knitr)
+library(ggcorrplot)
+library(stringr)
+library(xgboost)
+library(lubridate)
+library(plotly)
+library(htmlwidgets)
+
+movies <- readRDS("movies_cleaned.rds")
+```
+
+# Response Variable
+```{r}
+gg <- ggplot(movies, aes(x = log10(revenue), 
+                         text = paste0("Log10(Revenue): ", round(log10(revenue), 2)))) +
+  geom_histogram(bins = 30, fill = "#3498db", color = "white", alpha = 0.8) +
+  theme_minimal() +
+  labs(
+    title = "Distribution of Movie Revenue (Log Scale)", 
+    x = "Log10(Revenue)", 
+    y = "Frequency"
+  ) +
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 14, face = "bold")
+  )
+
+ggplotly(gg, tooltip = "text")
+
+```
+
+Figure 1: Histograms of movie revenue on a log10 scale (right).
+The raw distribution is heavily right-skewed with a few extremely high earners, while the log
+transformation provides a more balanced view of the data.
+
+# Response vs Predictors {.tabset .tabset-fade}
+
+## Budget vs. Revenue
+```{r}
+gg <- ggplot(movies, aes(x = log10(budget), y = log10(revenue),
+                         text = paste0("Title: ", title,
+                                       "<br>Log10(Budget): ", round(log10(budget), 2),
+                                       "<br>Log10(Revenue): ", round(log10(revenue), 2)))) +
+  geom_point(alpha = 0.4, color = "#e74c3c") +
+  geom_smooth(method = "lm", color = "#2c3e50", se = FALSE, linetype = "dashed") +
+  theme_minimal() +
+  labs(
+    title = "Budget vs. Revenue", 
+    x = "Log10(Budget)", 
+    y = "Log10(Revenue)"
+  ) +
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 14, face = "bold")
+  )
+
+ggplotly(gg, tooltip = "text")
+```
+
+Figure 2: Scatter plot of budget vs. revenue, both on log₁₀ scales. The dashed line represents
+the fitted linear trend, indicating a generally positive relationship between higher budgets and
+higher revenues.
+
+## Popularity vs. Revenue
+```{r}
+gg <- ggplot(movies, aes(x = popularity, y = log10(revenue),
+                         text = paste0("Title: ", title,
+                                       "<br>Popularity: ", round(popularity, 2),
+                                       "<br>Log10(Revenue): ", round(log10(revenue), 2)))) +
+  geom_point(alpha = 0.5, color = "#3498db") +
+  geom_smooth(method = "lm", color = "#2c3e50", se = FALSE, linetype = "dashed") +
+  theme_minimal() +
+  labs(
+    title = "Movie Popularity vs. Revenue",
+    x = "TMDb Popularity Score",
+    y = "Log10(Revenue)"
+  ) +
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 14, face = "bold"),
+    axis.text = element_text(size = 12),
+    axis.title = element_text(size = 13, face = "bold")
+  )
+
+ggplotly(gg, tooltip = "text")
+```
+
+Figure 3: Scatter plot of TMDB popularity vs. log10(revenue). The dashed trend line suggests
+a modestly positive relationship, though the effect appears weaker than that of budget.
+
+## Runtime vs. Revenue
+```{r}
+gg <- ggplot(movies, aes(x = runtime, y = log10(revenue),
+                         text = paste0("Title: ", title,
+                                       "<br>Runtime: ", runtime, " min",
+                                       "<br>Log10(Revenue): ", round(log10(revenue), 2)))) +
+  geom_point(alpha = 0.6, color = "#E74C3C") +
+  geom_smooth(method = "lm", color = "#2c3e50", se = FALSE, linetype = "dashed") +
+  theme_minimal() +
+  labs(
+    title = "Movie Runtime vs. Revenue",
+    x = "Runtime (minutes)",
+    y = "Log10(Revenue)"
+  ) +
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 14, face = "bold"),
+    axis.text = element_text(size = 12),  
+    axis.title = element_text(size = 13, face = "bold")
+  )
+
+ggplotly(gg, tooltip = "text")
+```
+
+Figure 4: Scatter plot of movie runtime vs. log10(revenue). The dashed regression line indicates
+a moderate positive trend, suggesting that longer movies may tend to earn slightly higher
+revenues.
+
+## Season vs. Revenue
+```{r}
+gg <- ggplot(movies, aes(x = season, y = log10(revenue), fill = season,
+                         text = paste0("Title: ", title,
+                                       "<br>Season: ", season,
+                                       "<br>Log10(Revenue): ", round(log10(revenue), 2)))) +
+  geom_boxplot(alpha = 0.85, outlier.shape = 21, outlier.fill = "white", outlier.color = "black") +
+  scale_fill_manual(values = c("Winter" = "#74b9ff",
+                               "Spring" = "#00b894",
+                               "Summer" = "#f9ca24",
+                               "Fall" = "#d35400")) +
+  theme_minimal() +
+  labs(
+    title = "Movie Revenue by Release Season", 
+    x = "Season", 
+    y = "Log10(Revenue)"
+  ) +
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 14, face = "bold"),
+    legend.position = "none",
+    axis.text.x = element_text(face = "bold", size = 12)
+  )
+
+ggplotly(gg, tooltip = "text")
+```
+
+Figure 5: Boxplots of log10(revenue) by season (Fall, Spring, Summer, Winter). The median
+revenue does not vary drastically between seasons, but Summer and Spring appear to have
+slightly higher median values compared to Fall and Winter.
+
+
+## Release Year vs. Revenue
+```{r}
+# Compute average revenue per year
+avg_revenue <- movies |>
+  group_by(release_year) |>
+  summarize(avg_rev = mean(revenue, na.rm = TRUE), .groups = "drop")
+
+# Create interactive line chart
+plot_ly(
+  data = avg_revenue,
+  x = ~release_year,
+  y = ~avg_rev,
+  type = "scatter",
+  mode = "lines+markers",
+  line = list(color = "red", width = 2),
+  marker = list(color = "black", size = 4),
+  hoverinfo = "text",
+  text = ~paste("Year:", release_year,
+                "<br>Average Revenue: $", format(round(avg_rev), big.mark = ","))
+) |>
+  layout(
+    title = "Average Movie Revenue Over Time",
+    xaxis = list(title = "Release Year"),
+    yaxis = list(title = "Average Revenue (USD)")
+  )
+```
+
+Figure 6: Time series plot of average movie revenue by release year. The general trend shows
+increasing revenues over time, with more volatility in recent decades. A noticeable dip around
+2019-2020 could be attributed to the impact of the COVID-19 pandemic on the film industry.
+
+## Genre vs. Revenue
+```{r}
+# Define genre columns
+genre_cols <- c("Action", "Adventure", "Fantasy", "Science Fiction", "Drama", "Romance",
+                "Animation", "Comedy", "Family", "Thriller", "Crime", "History", "Music",
+                "War", "Mystery", "Horror", "Western", "Documentary")
+
+# Reshape and summarize
+genre_summary <- movies |>
+  select(title, revenue, budget, popularity, release_date, all_of(genre_cols)) |>
+  pivot_longer(cols = all_of(genre_cols), names_to = "genre", values_to = "has_genre") |>
+  filter(has_genre == 1) |>
+  mutate(log_revenue = log10(revenue), log_budget = log10(budget)) |>
+  group_by(genre) |>
+  mutate(
+    movie_count = n(),
+    mean_rev = mean(log_revenue, na.rm = TRUE),
+    median_rev = median(log_revenue, na.rm = TRUE),
+    mean_pop = mean(popularity, na.rm = TRUE)
+  ) |>
+  ungroup()
+
+# Data for hover layer: one point per genre
+hover_data <- genre_summary |>
+  group_by(genre) |>
+  summarize(
+    movie_count = n(),
+    mean_rev = mean(log_revenue),
+    median_rev = median(log_revenue),
+    mean_pop = mean(popularity),
+    .groups = "drop"
+  ) |>
+  mutate(hover_text = paste0(
+    "Genre: ", genre,
+    "<br>Total Movies: ", movie_count,
+    "<br>Average Log Revenue: ", round(mean_rev, 2),
+    "<br>Average Popularity: ", round(mean_pop, 2)
+  ))
+
+# Calculate Q1, Q3, IQR per genre
+iqr_stats <- genre_summary |>
+  group_by(genre) |>
+  summarize(
+    Q1 = quantile(log_revenue, 0.25),
+    Q3 = quantile(log_revenue, 0.75),
+    IQR = IQR(log_revenue),
+    .groups = "drop"
+  )
+
+# Join IQR stats back to data
+outliers <- genre_summary |>
+  left_join(iqr_stats, by = "genre") |>
+  filter(log_revenue < Q1 - 1.5 * IQR | log_revenue > Q3 + 1.5 * IQR) |>
+  mutate(hover = paste0(
+    "Title: ", title,
+    "<br>Log₁₀ Revenue: ", round(log_revenue, 2),
+    "<br>Log₁₀ Budget: ", round(log_budget, 2),
+    "<br>Popularity: ", popularity,
+    "<br>Release Date: ", release_date
+  ))
+
+# Plot
+plot_ly() |>
+  add_trace(
+    data = genre_summary,
+    y = ~genre,
+    x = ~log_revenue,
+    type = "box",
+    color = ~genre,
+    boxpoints = "outliers",
+    orientation = "h",
+    hoverinfo = "skip",
+    name = ~genre
+  ) |>
+  add_trace(
+    data = outliers,
+    y = ~genre,
+    x = ~log_revenue,
+    type = "scatter",
+    mode = "markers",
+    marker = list(opacity = 0, size = 5, symbol = "circle", color = "#440154"),
+    text = ~hover,
+    hoverinfo = "text",
+    showlegend = FALSE
+  ) |>
+  add_trace(
+    data = hover_data,
+    y = ~genre,
+    x = ~median_rev,
+    type = "scatter",
+    mode = "markers",
+    marker = list(opacity = 0, size = 1, color = "#440154"),
+    text = ~hover_text,
+    hoverinfo = "text",
+    showlegend = FALSE
+  ) |>
+  layout(
+    title = "Revenue by Genre (Log₁₀ Scale)",
+    xaxis = list(title = "Log₁₀ Revenue"),
+    yaxis = list(title = "Genre"),
+    showlegend = FALSE
+  )
+```
+
+Figure 7: Boxplots of log10(revenue) for different genres. Adventure, Science Fiction, Fantasy,
+and Animation films tend to have the highest median revenues, while Documentary and
+History films generally have lower revenue distributions. The presence of extreme outliers
+suggests that a few blockbuster movies significantly impact the revenue distribution for
+certain genres. Upon inspection, the notable high-revenue outlier in the History genre is
+Oppenheimer, which is expected given its massive box office success.
+
+## Actor Popularity vs. Revenue
+```{r}
+gg <- ggplot(movies, aes(x = actor_avg_pop, y = log10(revenue),
+                         text = paste0("Title: ", title,
+                                       "<br>Actor Popularity: ", round(actor_avg_pop, 2),
+                                       "<br>Log10(Revenue): ", round(log10(revenue), 2)))) +
+  geom_point(alpha = 0.5, color = "#9b59b6") +
+  geom_smooth(method = "lm", col = "#2c3e50", se = FALSE, linetype = "dashed") +
+  theme_minimal() +
+  labs(
+    title = "Actor Popularity vs. Revenue", 
+    x = "Average Actor Popularity", 
+    y = "Log10(Revenue)"
+  ) +
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 14, face = "bold")
+  )
+
+ggplotly(gg, tooltip = "text")
+```
+
+Figure 8: Scatter plot of average actor popularity vs. log10(revenue). There is a moderately strong positive relationship, indicating that movies featuring more popular actors tend to generate higher revenue. This aligns with expectations, as well-known actors often attract larger audiences and drive box office performance.
+
+## Crew Popularity vs. Revenue
+```{r}
+gg <- ggplot(movies, aes(x = crew_avg_pop, y = log10(revenue),
+                         text = paste0("Title: ", title,
+                                       "<br>Crew Popularity: ", round(crew_avg_pop, 2),
+                                       "<br>Log10(Revenue): ", round(log10(revenue), 2)))) +
+  geom_point(alpha = 0.5, color = "#e74c3c") +
+  geom_smooth(method = "lm", col = "#2c3e50", se = FALSE, linetype = "dashed") +
+  theme_minimal() +
+  labs(
+    title = "Crew Popularity vs. Revenue",
+    x = "Average Crew Popularity",
+    y = "Log10(Revenue)"
+  ) +
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 14, face = "bold"),
+    axis.text = element_text(size = 12),
+    axis.title = element_text(size = 13, face = "bold")
+  )
+
+ggplotly(gg, tooltip = "text")
+```
+
+Figure 9: Scatter plot of average crew popularity vs. log10(revenue). Unlike actor popularity, crew popularity shows little to no correlation with revenue, suggesting that a well-known production team does not necessarily translate to higher box office earnings. This also makes sense when we think that most people might only pay attention to actors appearing on screen, rather than those behind it.
+
+
+
+
+

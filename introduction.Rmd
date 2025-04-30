@@ -1,0 +1,20 @@
+---
+title: "Introduction"
+output:
+  html_document:
+    theme: flatly
+    highlight: textmate
+    css: styles.css
+---
+
+### What Makes Movies Successful?
+
+The success of a movie at the box office is influenced by various factors, ranging from production-related aspects like budget and cast to external elements such as release timing and genre preferences. Understanding these relationships is valuable for both the film industry and researchers studying entertainment economics. While certain patterns, such as high-budget blockbuster films often generating significant revenue may seem intuitive, the extent to which different factors contribute to box office performance remains an open question.
+
+This project explores how multiple factors—including budget, popularity, adult rating, release season, runtime, genres, actors, and crew—relate to a movie's box office revenue. By conducting exploratory data analysis (EDA), I aim to uncover potential correlations and trends within these variables, identifying which characteristics are most associated with financial success.
+
+> **Research Question**: *How do factors such as budget, popularity, adult rating, release season, runtime, genres, actors, and crew influence a movie's box office revenue?*
+
+This analysis will serve as a foundation for further statistical modeling, helping to assess whether certain attributes have a measurable impact on revenue. The findings from this exploratory phase will provide insights into potential predictive relationships and guide future research in film analytics.
+
+Building on this exploratory phase, I implemented two predictive models—Random Forest and XGBoost—to assess how well movie features can explain and predict revenue. These models complement the earlier statistical analysis by capturing nonlinear relationships and interactions that may not be evident through traditional regression alone.
